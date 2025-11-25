@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 # --- Configuração da Página ---
 st.set_page_config(page_title="Detector de Acordes IA", page_icon="🎵")
 
-st.title("🎵 Transcritor de Áudio para Cifras (Protótipo)")
-st.write("Faça upload da sua música do SUNO para detectar o Tom e os Acordes.")
+st.title("🎵 Transcritor de Áudio para Cifras (Projetado por CLB Robotics)")
+st.write("Faça upload da sua música para detectar o Tom e os Acordes.")
 
 # --- Dicionários de Recursos Musicais ---
 
@@ -274,6 +274,7 @@ def estimate_key(chroma):
 def detect_beats_and_chords(y_harmonic, sr, chroma):
     """
     Detecta BPM, tempos fortes (beats) e alinha a detecção de acordes com esses tempos.
+    Retorna também os frames das batidas para visualização.
     """
     # 1. Detecção de Ritmo (Tempo)
     tempo, beats = librosa.beat.beat_track(y=y_harmonic, sr=sr)
@@ -294,10 +295,12 @@ def detect_beats_and_chords(y_harmonic, sr, chroma):
     detected_chords = []
     
     # 3. Alinhamento dos Acordes com os Tempos Fortes (Beats)
+    beat_frames = [] # Novo: armazena os índices de frame das batidas
     for i, beat_frame in enumerate(beats):
         
         # Usa o quadro de chroma que corresponde à batida
         frame_index = beat_frame 
+        beat_frames.append(frame_index) # Adiciona o frame
         
         # Garantir que o índice não exceda o tamanho da matriz chroma
         if frame_index >= chroma.shape[1]:
@@ -320,9 +323,12 @@ def detect_beats_and_chords(y_harmonic, sr, chroma):
         
         # Só adiciona se mudou o acorde ou é o primeiro
         if not detected_chords or detected_chords[-1]['chord'] != best_chord:
-            detected_chords.append({'beat': i + 1, 'chord': best_chord}) # Batida começa em 1
+            # Se for N.C. e o último também for N.C., não adiciona para evitar repetições excessivas
+            if best_chord == "N.C." and detected_chords and detected_chords[-1]['chord'] == "N.C.":
+                continue
+            detected_chords.append({'beat': i + 1, 'chord': best_chord, 'frame': frame_index}) # Batida começa em 1
 
-    return detected_chords, tempo
+    return detected_chords, tempo, beat_frames # Retorna a lista de frames
 
 def display_chord_diagrams(chords_list):
     """
@@ -404,6 +410,37 @@ E|-------•---T---•---------|  <-- Casa 12-15
     # A implementação completa de um braço de violão dinâmico é muito complexa para ASCII.
 
 
+def format_and_display_chords(chords_list, beats_per_line=4):
+    """
+    Formata a sequência de acordes em linhas, simulando compassos.
+    Atenção: A lista de acordes é de acordes DETECTADOS, não de todas as batidas.
+    """
+    st.info("A sequência abaixo mostra a cifra no momento em que a batida muda. Um acorde é mantido até a próxima cifra aparecer.")
+    
+    markdown_output = "```markdown\n"
+    
+    # Inicia a contagem da batida real (que a IA detectou)
+    beat_counter = 1 
+    
+    for item in chords_list:
+        chord = item['chord']
+        
+        # Adiciona o acorde com a tag de batida
+        beat_tag = f"[B:{item['beat']:02d}]"
+        markdown_output += f"{beat_tag} **{chord}** "
+        
+        # Quebra de linha a cada 'beats_per_line'
+        if beat_counter % beats_per_line == 0:
+            markdown_output += "\n"
+        else:
+            markdown_output += " | " # Separador visual para o compasso
+        
+        beat_counter += 1
+        
+    markdown_output += "\n```"
+    st.markdown(markdown_output)
+
+
 # --- Interface do Usuário ---
 
 uploaded_file = st.file_uploader("Escolha um arquivo de áudio (MP3/WAV)", type=["mp3", "wav"])
@@ -431,22 +468,18 @@ if uploaded_file is not None:
             key = estimate_key(chroma)
             st.success(f"🔑 Tonalidade Detectada: **{key}**")
             
-            # --- NOVO: Sugestão de Escala para Tablatura/Riffs ---
+            # --- Sugestão de Escala para Tablatura/Riffs ---
             display_scale_suggestion(key)
             
             # 5. Detectar Sequência de Acordes e Batidas
             st.subheader("📜 Sequência de Acordes (Alinhada por Batida)")
-            chords_by_beat, tempo = detect_beats_and_chords(y_harmonic, sr, chroma)
+            # Agora detect_beats_and_chords retorna os frames
+            chords_by_beat, tempo, beat_frames = detect_beats_and_chords(y_harmonic, sr, chroma)
             
             st.info(f"Metrônomo Detectado: **{int(tempo)} BPM**")
 
-            # Formatar e exibir a sequência
-            chord_str = ""
-            for item in chords_by_beat:
-                # Exibe a batida e o acorde
-                chord_str += f"**[B:{item['beat']:02d}]** {item['chord']}  ➡️  "
-            
-            st.markdown(chord_str)
+            # --- MELHORIA 1: Formatação de Acordes ---
+            format_and_display_chords(chords_by_beat, beats_per_line=4)
             
             # --- Exibir Diagramas de Acordes ---
             display_chord_diagrams(chords_by_beat)
@@ -459,6 +492,13 @@ if uploaded_file is not None:
             fig, ax = plt.subplots(figsize=(10, 5))
             librosa.display.specshow(chroma, y_axis='chroma', x_axis='time', ax=ax)
             ax.set(title='Chromagram')
+            
+            # --- MELHORIA 2: Linhas Verticais para Batidas ---
+            # Converte os frames das batidas para tempo em segundos
+            beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+            # Adiciona linhas verticais em cada batida detectada
+            ax.vlines(beat_times, 0, chroma.shape[0], color='w', linestyle='--', alpha=0.8, label='Batidas')
+            
             st.pyplot(fig) 
             
             st.markdown("---")
