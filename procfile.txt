@@ -1,1 +1,0 @@
-web: streamlit run app_musica.py --server.port $PORT
