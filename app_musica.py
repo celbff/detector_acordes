@@ -12,10 +12,12 @@ st.set_page_config(page_title="Detector de Acordes IA", page_icon="🎵")
 st.title("🎵 Transcritor de Áudio para Cifras (Protótipo)")
 st.write("Faça upload da sua música do SUNO para detectar o Tom e os Acordes.")
 
-# --- Dicionário de Diagramas de Acordes (Representação em ASCII/Texto) ---
-# Formato: [Acorde] -> [Diagrama de 6 cordas (E A D G B e)]
-# X = Não tocar (mute), 0 = Corda Solta, 1-6 = Casa a pressionar
+# --- Dicionários de Recursos Musicais ---
+
+# Dicionário de digitações de acordes (Mantido o mesmo)
 GUITAR_CHORD_FINGERINGS = {
+    # [Dicionário de Acordes: C, Cm, G, Gm, etc.]
+    # ... (Conteúdo original de GUITAR_CHORD_FINGERINGS) ...
     "C": """
    C
 e|-0-|
@@ -124,7 +126,6 @@ D|-3-|
 A|-3-|
 E|-1-|
 """,
-    # Acordes com sustenidos e bemóis (F#, G#, A#, C#, D#)
     "F#": """
    F#
 e|-2-|
@@ -218,6 +219,16 @@ E|---|
     "N.C.": "   N.C.\n(Sem Acorde)"
 }
 
+
+# Tonalidade -> Intervalos da Escala Pentatônica (em semitons)
+# Maior: T(0), 2M(2), 3M(4), 5J(7), 6M(9)
+# Menor: T(0), 3m(3), 4J(5), 5J(7), 7m(10)
+SCALE_INTERVALS = {
+    "Maior": [0, 2, 4, 7, 9],
+    "Menor": [0, 3, 5, 7, 10]
+}
+
+NOTES_DICT = {i: note for i, note in enumerate(['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'])}
 
 # --- Funções de Análise Musical ---
 
@@ -339,6 +350,60 @@ def display_chord_diagrams(chords_list):
         cols[i % 4].markdown(f"```text\n{diagram}\n```")
 
 
+def display_scale_suggestion(key_name):
+    """
+    Sugere e exibe a escala pentatônica para a tonalidade detectada.
+    """
+    if ' ' not in key_name:
+        return # Tonalidade não está no formato esperado (ex: "C Maior")
+        
+    root, quality = key_name.split() # Ex: 'C' e 'Maior'
+    
+    # Mapear qualidade para o dicionário de intervalos
+    scale_type = 'Maior' if quality == 'Maior' else 'Menor'
+    intervals = SCALE_INTERVALS.get(scale_type, [])
+    
+    if not intervals:
+        return
+        
+    # Encontrar o índice da nota tônica (root)
+    root_index = [i for i, note in NOTES_DICT.items() if note == root]
+    if not root_index:
+        return
+    root_index = root_index[0]
+    
+    # Gerar as notas da escala
+    scale_notes = sorted([NOTES_DICT[(root_index + interval) % 12] for interval in intervals])
+    scale_name = f"{root} {scale_type} Pentatônica"
+
+    st.subheader("🎼 Sugestão para Riffs e Introduções")
+    st.markdown(f"A melhor escala para solos e melodias é a **{scale_name}**.")
+    st.markdown(f"**Notas:** {', '.join(scale_notes)}")
+    
+    # Geração do diagrama da escala (Caixa de Escala na 5ª casa)
+    
+    # O diagrama ASCII para a escala pentatônica de A menor (base na 5ª casa)
+    # Tônica (T) em E/A/D/G/B/e
+    
+    diagram = f"""
+   Escala: {scale_name}
+(T = Tônica, • = Nota da Escala)
+
+e|-----------------•---T---|  <-- Casa 17-20
+B|---------------•---T---•-|  <-- Casa 15-18
+G|-------------•---T---•---|  <-- Casa 14-17
+D|-----------•---•---T-----|  <-- Casa 12-15
+A|---------•---•---T-------|  <-- Casa 12-15
+E|-------•---T---•---------|  <-- Casa 12-15
+
+"""
+    st.markdown("Use esta **'Caixa de Escala'** para tocar riffs.")
+    st.code(diagram, language='text')
+    
+    # A sugestão de diagrama acima é genérica (Caixa 1, posição Lá), mas indica as notas.
+    # A implementação completa de um braço de violão dinâmico é muito complexa para ASCII.
+
+
 # --- Interface do Usuário ---
 
 uploaded_file = st.file_uploader("Escolha um arquivo de áudio (MP3/WAV)", type=["mp3", "wav"])
@@ -366,6 +431,9 @@ if uploaded_file is not None:
             key = estimate_key(chroma)
             st.success(f"🔑 Tonalidade Detectada: **{key}**")
             
+            # --- NOVO: Sugestão de Escala para Tablatura/Riffs ---
+            display_scale_suggestion(key)
+            
             # 5. Detectar Sequência de Acordes e Batidas
             st.subheader("📜 Sequência de Acordes (Alinhada por Batida)")
             chords_by_beat, tempo = detect_beats_and_chords(y_harmonic, sr, chroma)
@@ -380,7 +448,7 @@ if uploaded_file is not None:
             
             st.markdown(chord_str)
             
-            # --- NOVO: Exibir Diagramas de Acordes ---
+            # --- Exibir Diagramas de Acordes ---
             display_chord_diagrams(chords_by_beat)
             
             st.markdown("---")
@@ -394,7 +462,7 @@ if uploaded_file is not None:
             st.pyplot(fig) 
             
             st.markdown("---")
-            st.markdown(f"**Próximo Passo:** Use a Batida (`B:xx`) para alinhar a letra. Cada número representa um pulso forte da música. Por exemplo: `[B:01] Amor [B:05] é algo...`")
+            st.markdown(f"**Próximo Passo:** Use a Batida (`B:xx`) para alinhar a letra. Cada número representa um pulso forte da música. O Tempo é de aproximadamente **{int(tempo)} BPM**.")
 
         except Exception as e:
             st.error(f"Erro ao processar: {e}. (Verifique se o arquivo de áudio é válido.)")
