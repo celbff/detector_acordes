@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 # --- Configuração da Página ---
 st.set_page_config(page_title="Detector de Acordes IA", page_icon="🎵")
 
-st.title("🎵 Transcritor de Áudio para Cifras (Projetado por CLB Robotics)")
-st.write("Faça upload da sua música para detectar o Tom e os Acordes.")
+st.title("🎵 Transcritor de Áudio para Cifras (Protótipo)")
+st.write("Faça upload da sua música do SUNO e da letra para análise e sincronização.")
 
 # --- Dicionários de Recursos Musicais ---
 
@@ -221,8 +221,6 @@ E|---|
 
 
 # Tonalidade -> Intervalos da Escala Pentatônica (em semitons)
-# Maior: T(0), 2M(2), 3M(4), 5J(7), 6M(9)
-# Menor: T(0), 3m(3), 4J(5), 5J(7), 7m(10)
 SCALE_INTERVALS = {
     "Maior": [0, 2, 4, 7, 9],
     "Menor": [0, 3, 5, 7, 10]
@@ -233,18 +231,13 @@ NOTES_DICT = {i: note for i, note in enumerate(['C', 'C#', 'D', 'D#', 'E', 'F', 
 # --- Funções de Análise Musical ---
 
 def estimate_key(chroma):
-    """
-    Estima o tom global comparando com perfis de Major/Minor (Krumhansl-Schmuckler)
-    """
-    # Perfis teóricos para acordes Maiores e Menores
+    # [Função de estimate_key mantida]
     major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
     minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
     
-    # Normalizar perfis
     major_profile /= np.linalg.norm(major_profile)
     minor_profile /= np.linalg.norm(minor_profile)
     
-    # Calcular a média do croma da música inteira
     chroma_mean = np.mean(chroma, axis=1)
     chroma_mean /= np.linalg.norm(chroma_mean)
     
@@ -252,9 +245,7 @@ def estimate_key(chroma):
     max_corr = -1
     best_key = ""
     
-    # Correlacionar para cada uma das 12 notas
     for i in range(12):
-        # Rotacionar perfil para testar cada tônica
         profile_maj = np.roll(major_profile, i)
         profile_min = np.roll(minor_profile, i)
         
@@ -272,72 +263,60 @@ def estimate_key(chroma):
     return best_key
 
 def detect_beats_and_chords(y_harmonic, sr, chroma):
-    """
-    Detecta BPM, tempos fortes (beats) e alinha a detecção de acordes com esses tempos.
-    Retorna também os frames das batidas para visualização.
-    """
-    # 1. Detecção de Ritmo (Tempo)
+    # [Função de detect_beats_and_chords mantida]
     tempo, beats = librosa.beat.beat_track(y=y_harmonic, sr=sr)
     
-    # 2. Definição simplificada de templates de acordes (Tríades)
     templates = {}
     notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
     
     for i, root in enumerate(notes):
-        # Maior: Tônica, Terça Maior (+4), Quinta Justa (+7)
         vec_maj = np.zeros(12); vec_maj[i] = 1; vec_maj[(i+4)%12] = 1; vec_maj[(i+7)%12] = 1
         templates[f"{root}"] = vec_maj
         
-        # Menor: Tônica, Terça Menor (+3), Quinta Justa (+7)
         vec_min = np.zeros(12); vec_min[i] = 1; vec_min[(i+3)%12] = 1; vec_min[(i+7)%12] = 1
         templates[f"{root}m"] = vec_min
         
     detected_chords = []
-    
-    # 3. Alinhamento dos Acordes com os Tempos Fortes (Beats)
-    beat_frames = [] # Novo: armazena os índices de frame das batidas
+    beat_frames = [] 
     for i, beat_frame in enumerate(beats):
         
-        # Usa o quadro de chroma que corresponde à batida
         frame_index = beat_frame 
-        beat_frames.append(frame_index) # Adiciona o frame
+        beat_frames.append(frame_index) 
         
-        # Garantir que o índice não exceda o tamanho da matriz chroma
         if frame_index >= chroma.shape[1]:
             break 
             
-        # Pega o vetor de chroma no momento exato da batida
         avg_vec = chroma[:, frame_index] 
         
         best_score = -1
-        best_chord = "N.C." # No Chord
+        best_chord = "N.C." 
         
-        # 4. Correlacionar com os templates
-        if np.sum(avg_vec) > 0.1: # Ignora se for muito silencioso
+        if np.sum(avg_vec) > 0.1: 
             for name, template in templates.items():
-                # Calcula a correlação (produto escalar)
                 score = np.dot(avg_vec, template)
                 if score > best_score:
                     best_score = score
                     best_chord = name
         
-        # Só adiciona se mudou o acorde ou é o primeiro
         if not detected_chords or detected_chords[-1]['chord'] != best_chord:
-            # Se for N.C. e o último também for N.C., não adiciona para evitar repetições excessivas
             if best_chord == "N.C." and detected_chords and detected_chords[-1]['chord'] == "N.C.":
                 continue
-            detected_chords.append({'beat': i + 1, 'chord': best_chord, 'frame': frame_index}) # Batida começa em 1
+            detected_chords.append({'beat': i + 1, 'chord': best_chord, 'frame': frame_index})
 
-    return detected_chords, tempo, beat_frames # Retorna a lista de frames
+    return detected_chords, tempo, beat_frames 
 
 def display_chord_diagrams(chords_list):
     """
     Exibe os diagramas em ASCII dos acordes únicos encontrados na música.
+    Inclui um log de quais acordes foram detectados para fins de depuração.
     """
-    # 1. Obter a lista de acordes únicos (e válidos)
+    # 1. Extrai os acordes únicos detectados
     unique_chords = sorted(list(set(item['chord'] for item in chords_list)))
     
-    # 2. Filtrar apenas acordes que têm um diagrama
+    # Adiciona log de debug para o usuário
+    st.code(f"Acordes Únicos Detectados: {unique_chords}", language="text")
+
+    # 2. Filtra a lista para apenas os acordes que temos diagramas
     diagram_chords = [c for c in unique_chords if c in GUITAR_CHORD_FINGERINGS]
     
     if not diagram_chords:
@@ -346,13 +325,10 @@ def display_chord_diagrams(chords_list):
 
     st.subheader("🎸 Diagramas de Acordes para Violão")
     
-    # Divide os diagramas em colunas para melhor visualização
     cols = st.columns(min(len(diagram_chords), 4)) 
     
     for i, chord in enumerate(diagram_chords):
         diagram = GUITAR_CHORD_FINGERINGS[chord]
-        
-        # Usa um bloco de código Markdown para formatar o diagrama em ASCII (Monospace)
         cols[i % 4].markdown(f"```text\n{diagram}\n```")
 
 
@@ -360,36 +336,29 @@ def display_scale_suggestion(key_name):
     """
     Sugere e exibe a escala pentatônica para a tonalidade detectada.
     """
+    # [Função de display_scale_suggestion mantida]
     if ' ' not in key_name:
-        return # Tonalidade não está no formato esperado (ex: "C Maior")
+        return 
         
-    root, quality = key_name.split() # Ex: 'C' e 'Maior'
+    root, quality = key_name.split() 
     
-    # Mapear qualidade para o dicionário de intervalos
     scale_type = 'Maior' if quality == 'Maior' else 'Menor'
     intervals = SCALE_INTERVALS.get(scale_type, [])
     
     if not intervals:
         return
         
-    # Encontrar o índice da nota tônica (root)
     root_index = [i for i, note in NOTES_DICT.items() if note == root]
     if not root_index:
         return
     root_index = root_index[0]
     
-    # Gerar as notas da escala
     scale_notes = sorted([NOTES_DICT[(root_index + interval) % 12] for interval in intervals])
     scale_name = f"{root} {scale_type} Pentatônica"
 
     st.subheader("🎼 Sugestão para Riffs e Introduções")
     st.markdown(f"A melhor escala para solos e melodias é a **{scale_name}**.")
     st.markdown(f"**Notas:** {', '.join(scale_notes)}")
-    
-    # Geração do diagrama da escala (Caixa de Escala na 5ª casa)
-    
-    # O diagrama ASCII para a escala pentatônica de A menor (base na 5ª casa)
-    # Tônica (T) em E/A/D/G/B/e
     
     diagram = f"""
    Escala: {scale_name}
@@ -406,20 +375,15 @@ E|-------•---T---•---------|  <-- Casa 12-15
     st.markdown("Use esta **'Caixa de Escala'** para tocar riffs.")
     st.code(diagram, language='text')
     
-    # A sugestão de diagrama acima é genérica (Caixa 1, posição Lá), mas indica as notas.
-    # A implementação completa de um braço de violão dinâmico é muito complexa para ASCII.
-
-
+    
 def format_and_display_chords(chords_list, beats_per_line=4):
     """
     Formata a sequência de acordes em linhas, simulando compassos.
-    Atenção: A lista de acordes é de acordes DETECTADOS, não de todas as batidas.
     """
     st.info("A sequência abaixo mostra a cifra no momento em que a batida muda. Um acorde é mantido até a próxima cifra aparecer.")
     
     markdown_output = "```markdown\n"
     
-    # Inicia a contagem da batida real (que a IA detectou)
     beat_counter = 1 
     
     for item in chords_list:
@@ -443,15 +407,23 @@ def format_and_display_chords(chords_list, beats_per_line=4):
 
 # --- Interface do Usuário ---
 
-uploaded_file = st.file_uploader("Escolha um arquivo de áudio (MP3/WAV)", type=["mp3", "wav"])
+# Organizar Uploads em colunas para melhor visualização
+col_audio, col_lyrics = st.columns(2)
 
-if uploaded_file is not None:
-    st.audio(uploaded_file, format='audio/mp3')
+with col_audio:
+    uploaded_audio = st.file_uploader("1. Escolha o Áudio (MP3/WAV)", type=["mp3", "wav"])
+
+with col_lyrics:
+    uploaded_lyrics = st.file_uploader("2. Escolha a Letra (TXT)", type=["txt"])
+
+
+if uploaded_audio is not None:
+    st.audio(uploaded_audio, format='audio/mp3')
     
     with st.spinner('A IA está ouvindo e analisando...'):
         # Salvar arquivo temporário para o Librosa ler
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
-            tmp_file.write(uploaded_file.getvalue())
+            tmp_file.write(uploaded_audio.getvalue())
             tmp_path = tmp_file.name
         
         try:
@@ -473,36 +445,49 @@ if uploaded_file is not None:
             
             # 5. Detectar Sequência de Acordes e Batidas
             st.subheader("📜 Sequência de Acordes (Alinhada por Batida)")
-            # Agora detect_beats_and_chords retorna os frames
             chords_by_beat, tempo, beat_frames = detect_beats_and_chords(y_harmonic, sr, chroma)
             
             st.info(f"Metrônomo Detectado: **{int(tempo)} BPM**")
 
-            # --- MELHORIA 1: Formatação de Acordes ---
+            # --- Formatação de Acordes ---
             format_and_display_chords(chords_by_beat, beats_per_line=4)
             
             # --- Exibir Diagramas de Acordes ---
             display_chord_diagrams(chords_by_beat)
             
+            # --- Exibir Letra para Sincronização Manual ---
+            if uploaded_lyrics is not None:
+                st.subheader("📝 Letra Original (Pronta para Sincronização)")
+                try:
+                    # Lê o conteúdo do arquivo TXT
+                    lyrics_content = uploaded_lyrics.getvalue().decode("utf-8")
+                    
+                    # Usa um editor de texto para que o usuário possa copiar e editar
+                    st.text_area(
+                        "Edite e Sincronize a Letra", 
+                        value=lyrics_content, 
+                        height=300,
+                        help=f"Copie os marcadores de batida ([B:01], [B:02], etc.) da sequência de acordes e cole-os aqui para sincronizar a letra com a música."
+                    )
+                except Exception as e:
+                    st.error(f"Erro ao ler o arquivo de letra: {e}")
+
             st.markdown("---")
             
             # Visualização Gráfica
             st.subheader("📊 Visualização das Notas (Chromagram)")
-            # Usar plt.subplots para garantir que o Streamlit exiba corretamente
             fig, ax = plt.subplots(figsize=(10, 5))
             librosa.display.specshow(chroma, y_axis='chroma', x_axis='time', ax=ax)
-            ax.set(title='Chromagram')
+            ax.set(title='Chromagram com Batidas')
             
-            # --- MELHORIA 2: Linhas Verticais para Batidas ---
-            # Converte os frames das batidas para tempo em segundos
+            # Linhas Verticais para Batidas
             beat_times = librosa.frames_to_time(beat_frames, sr=sr)
-            # Adiciona linhas verticais em cada batida detectada
             ax.vlines(beat_times, 0, chroma.shape[0], color='w', linestyle='--', alpha=0.8, label='Batidas')
             
             st.pyplot(fig) 
             
             st.markdown("---")
-            st.markdown(f"**Próximo Passo:** Use a Batida (`B:xx`) para alinhar a letra. Cada número representa um pulso forte da música. O Tempo é de aproximadamente **{int(tempo)} BPM**.")
+            st.markdown(f"**Próximo Passo:** Use a Batida (`B:xx`) para alinhar a letra. O Tempo é de aproximadamente **{int(tempo)} BPM**.")
 
         except Exception as e:
             st.error(f"Erro ao processar: {e}. (Verifique se o arquivo de áudio é válido.)")
