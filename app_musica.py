@@ -125,7 +125,7 @@ if uploaded_file is not None:
         
         try:
             # 1. Carregar Áudio
-            y, sr = librosa.load(tmp_path, duration=60)
+            y, sr = librosa.load(tmp_path, sr=11025, duration=60)
             
             # 2. Separar Harmonia (melhora detecção de acordes)
             y_harmonic, y_percussive = librosa.effects.hpss(y)
@@ -159,3 +159,4 @@ if uploaded_file is not None:
         finally:
 
             os.remove(tmp_path) # Limpeza
+
