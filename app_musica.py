@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 # --- Configuração da Página ---
 st.set_page_config(page_title="Detector de Acordes IA", page_icon="🎵")
 
-st.title("🎵 Transcritor de Áudio para Cifras (Projeto: CLB Robotics)")
-st.write("Faça upload da sua música e da letra em .txt para análise de 60 segundos.")
+st.title("🎵 Transcritor de Áudio para Cifras (Protótipo)")
+st.write("Faça upload da sua música do SUNO e da letra para análise e sincronização.")
 
 # --- Dicionários de Recursos Musicais ---
 
@@ -455,6 +455,60 @@ def format_and_display_chords(chords_list, beats_per_line=4):
     st.markdown(markdown_output)
 
 
+def display_lyrics_with_chords(lyrics_content, chords_list):
+    """
+    Tenta sincronizar os acordes detectados com as linhas da letra,
+    fazendo uma distribuição básica.
+    """
+    
+    # 1. Limpa e divide a letra em linhas significativas
+    lines = [line.strip() for line in lyrics_content.split('\n') if line.strip()]
+    num_lines = len(lines)
+    num_chords = len(chords_list)
+    
+    if num_lines == 0 or num_chords == 0:
+        st.warning("Letra ou acordes não disponíveis para sincronização.")
+        return
+        
+    st.info(f"O Canvas tentou distribuir {num_chords} acordes por {num_lines} linhas de letra. Ajuste a posição dos acordes na caixa de texto abaixo.")
+
+    # 2. Distribui os acordes de forma básica
+    # Calcula quantos acordes em média por linha e o resto
+    chords_per_line = num_chords // num_lines
+    remainder = num_chords % num_lines
+    
+    output = ""
+    chord_index = 0
+    
+    for i, line in enumerate(lines):
+        # Determina quantos acordes esta linha receberá
+        current_line_chord_count = chords_per_line + (1 if i < remainder else 0)
+        
+        chords_for_line = []
+        for j in range(current_line_chord_count):
+            if chord_index < num_chords:
+                chords_for_line.append(chords_list[chord_index]['chord'])
+                chord_index += 1
+            else:
+                break
+        
+        chord_line = ""
+        if chords_for_line:
+            # Junta os acordes com 4 espaços como separador para alinhamento
+            chord_line = "    ".join(chords_for_line)
+        
+        # Formato de saída: Linha de acordes (pode estar vazia) + Linha da letra
+        output += f"{chord_line}\n{line}\n\n"
+        
+    # 3. Exibe o resultado para edição manual do usuário
+    st.text_area(
+        "Edite e Sincronize a Letra (Acordes Estimados Acima da Linha)", 
+        value=output.strip(), 
+        height=400,
+        help="Os acordes foram distribuídos automaticamente, mas o alinhamento de tempo (sincronização) é aproximado. Você pode mover os acordes para o ponto exato onde a letra/música os requer."
+    )
+
+
 # --- Interface do Usuário ---
 
 # Organizar Uploads em colunas para melhor visualização
@@ -477,7 +531,7 @@ if uploaded_audio is not None:
             tmp_path = tmp_file.name
         
         try:
-            # 1. Carregar Áudio (Otimizado para o Render)
+            # 1. Carregar Áudio (REVERTIDO para 60 segundos para evitar erro de memória/502)
             y, sr = librosa.load(tmp_path, sr=11025, duration=60)
             
             # 2. Separar Harmonia (melhora detecção de acordes)
@@ -505,20 +559,16 @@ if uploaded_audio is not None:
             # --- Exibir Diagramas de Acordes ---
             display_chord_diagrams(chords_by_beat)
             
-            # --- Exibir Letra para Sincronização Manual ---
+            # --- Exibir Letra para Sincronização Automática Básica (Mantido) ---
             if uploaded_lyrics is not None:
-                st.subheader("📝 Letra Original (Pronta para Sincronização)")
+                st.subheader("📝 Letra com Acordes Estimados (Pronta para Ajuste)")
                 try:
                     # Lê o conteúdo do arquivo TXT
                     lyrics_content = uploaded_lyrics.getvalue().decode("utf-8")
                     
-                    # Usa um editor de texto para que o usuário possa copiar e editar
-                    st.text_area(
-                        "Edite e Sincronize a Letra", 
-                        value=lyrics_content, 
-                        height=300,
-                        help=f"Copie os marcadores de batida ([B:01], [B:02], etc.) da sequência de acordes e cole-os aqui para sincronizar a letra com a música."
-                    )
+                    # Usa a função de sincronização básica
+                    display_lyrics_with_chords(lyrics_content, chords_by_beat)
+
                 except Exception as e:
                     st.error(f"Erro ao ler o arquivo de letra: {e}")
 
@@ -526,9 +576,16 @@ if uploaded_audio is not None:
             
             # Visualização Gráfica
             st.subheader("📊 Visualização das Notas (Chromagram)")
+            
+            # CORREÇÃO: Define o limite de tempo para 60.0 segundos
+            max_duration = 60.0 
+            
             fig, ax = plt.subplots(figsize=(10, 5))
             librosa.display.specshow(chroma, y_axis='chroma', x_axis='time', ax=ax)
             ax.set(title='Chromagram com Batidas')
+            
+            # CORREÇÃO: Força o limite do eixo X para garantir a exibição total dos 60s
+            ax.set_xlim([0, max_duration])
             
             # Linhas Verticais para Batidas
             beat_times = librosa.frames_to_time(beat_frames, sr=sr)
@@ -537,7 +594,7 @@ if uploaded_audio is not None:
             st.pyplot(fig) 
             
             st.markdown("---")
-            st.markdown(f"**Próximo Passo:** Use a Batida (`B:xx`) para alinhar a letra. O Tempo é de aproximadamente **{int(tempo)} BPM**.")
+            st.markdown(f"**Próximo Passo:** Use a Batida (`B:xx`) ou o tempo do Chromagram para ajustar o alinhamento da letra/acordes. O Tempo é de aproximadamente **{int(tempo)} BPM**.")
 
         except Exception as e:
             st.error(f"Erro ao processar: {e}. (Verifique se o arquivo de áudio é válido.)")
