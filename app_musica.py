@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 # --- Configuração da Página ---
 st.set_page_config(page_title="Detector de Acordes IA", page_icon="🎵")
 
-st.title("🎵 Transcritor de Áudio para Cifras (Protótipo)")
-st.write("Faça upload da sua música do SUNO e da letra para análise e sincronização.")
+st.title("🎵 Transcritor de Áudio para Cifras (Projeto: CLB Robotics)")
+st.write("Faça upload da sua música e da letra em .txt para análise de 60 segundos.")
 
 # --- Dicionários de Recursos Musicais ---
 
@@ -262,6 +262,51 @@ def estimate_key(chroma):
             
     return best_key
 
+def filter_short_chord_changes(chords_list):
+    """
+    Filtra acordes que duram apenas um beat e que retornam
+    imediatamente ao acorde anterior (evita 'blips' de detecção: A -> B -> A).
+    Isso ajuda a simplificar a transcrição de acordes.
+    """
+    if len(chords_list) < 3:
+        return chords_list
+
+    filtered_list = [chords_list[0]]
+    i = 1
+    while i < len(chords_list) - 1:
+        current_item = chords_list[i]
+        prev_item = filtered_list[-1]
+        next_item = chords_list[i+1]
+        
+        # Verifica o padrão: Acorde A -> Acorde B (1 beat) -> Acorde A
+        # O acorde 'current_item' é um 'blip' se ele é diferente do anterior,
+        # e o próximo acorde é igual ao anterior.
+        
+        # O teste é se o acorde atual dura apenas um beat *e* se o acorde vizinho é igual ao anterior.
+        # Devido à lógica de detecção, o acorde "current" já tem o beat imediatamente 
+        # após o beat do "prev_item"
+        if prev_item['chord'] == next_item['chord'] and \
+           prev_item['chord'] != current_item['chord']:
+           
+            # Pula o acorde 'current_item' (o blip) e continua a iteração, 
+            # mantendo o acorde anterior (prev_item) no filtered_list
+            i += 1
+            continue
+
+        filtered_list.append(current_item)
+        i += 1
+        
+    # Adiciona o último acorde, se não foi processado
+    if i == len(chords_list) - 1:
+        filtered_list.append(chords_list[-1])
+
+    # Caso a lista tenha sido reduzida a 1 elemento (por ser curta demais), retorna ela.
+    if not filtered_list:
+        return chords_list[:1] 
+
+    return filtered_list
+
+
 def detect_beats_and_chords(y_harmonic, sr, chroma):
     # [Função de detect_beats_and_chords mantida]
     tempo, beats = librosa.beat.beat_track(y=y_harmonic, sr=sr)
@@ -298,12 +343,17 @@ def detect_beats_and_chords(y_harmonic, sr, chroma):
                     best_score = score
                     best_chord = name
         
+        # Só adiciona se for um acorde diferente do último
         if not detected_chords or detected_chords[-1]['chord'] != best_chord:
+            # Evita acumular N.C.s consecutivos
             if best_chord == "N.C." and detected_chords and detected_chords[-1]['chord'] == "N.C.":
                 continue
             detected_chords.append({'beat': i + 1, 'chord': best_chord, 'frame': frame_index})
 
-    return detected_chords, tempo, beat_frames 
+    # NOVO: Aplica a filtragem para remover mudanças de acordes muito curtas (blips)
+    final_chords = filter_short_chord_changes(detected_chords)
+
+    return final_chords, tempo, beat_frames 
 
 def display_chord_diagrams(chords_list):
     """
